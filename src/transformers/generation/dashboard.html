@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Constrained Generation Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .highlight {
+            color: white;
+            background-color: #007acc;
+            padding: 2px 2px;
+            border-radius: 2px;
+        }
+        .output {
+            margin-bottom: 12px;
+            padding: 10px;
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            line-height: 1.5;
+            word-spacing: 8px; /* Add here for outputs only */
+        }
+        #refresh-btn {
+            margin-bottom: 20px;
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            font-size: 14px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #refresh-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Constrained Generation Dashboard</h1>
+
+    <button id="refresh-btn" onclick="loadDashboard()">Refresh</button>
+
+    <div class="section">
+        <h3>Model Used:</h3>
+        <p id="model-name">gpt2-large</p>
+    </div>
+
+    <div class="section">
+        <h3>Constraint Template:</h3>
+        <p id="constraint">["the", "", "School of", "", "in"]</p>
+    </div>
+
+    <div class="section">
+        <h3>Generated Outputs:</h3>
+        <div id="outputs"></div>
+    </div>
+
+    <script>
+        function highlightConstraints(text, phrases) {
+            phrases.forEach(phrase => {
+                const regex = new RegExp(`(${phrase})`, 'gi');
+                text = text.replace(regex, '<span class="highlight">$1</span>');
+            });
+            return text;
+        }
+
+        function loadDashboard() {
+            fetch('dashboard_data.json')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("model-name").textContent = data.model_name;
+                    document.getElementById("constraint").textContent = JSON.stringify(data.constraint);
+
+                    const outputContainer = document.getElementById("outputs");
+                    outputContainer.innerHTML = "";
+
+                    data.outputs.forEach(output => {
+                        const div = document.createElement("div");
+                        div.className = "output";
+                        div.innerHTML = highlightConstraints(output, data.constraint.filter(w => w));
+                        outputContainer.appendChild(div);
+                    });
+                });
+        }
+
+        // Initial load
+        loadDashboard();
+    </script>
+</body>
+</html>

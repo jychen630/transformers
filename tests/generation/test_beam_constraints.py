@@ -23,7 +23,7 @@ from transformers.testing_utils import require_torch
 if is_torch_available():
     import torch
 
-    from transformers.generation import DisjunctiveConstraint
+    from transformers.generation import DisjunctiveConstraint, TemplateConstraint
 
 
 @require_torch
@@ -113,3 +113,119 @@ class ConstraintTest(unittest.TestCase):
         self.assertTrue(dc.completed)  # Completed!
         self.assertTrue(dc.remaining() == 0)
         self.assertTrue(dc.current_seq == [1, 2, 5])
+
+
+@require_torch
+class TemplateConstraintTest(unittest.TestCase):
+    def test_input_types(self):
+        # Test valid template: ["the", "", "School of", "", "in"]
+        template = [5, -1, 10, 20, -1, 15]
+        tc = TemplateConstraint(template)
+        self.assertTrue(isinstance(tc.token_ids, list))
+
+        # Test invalid inputs
+        with self.assertRaises(ValueError):
+            TemplateConstraint(torch.tensor([5, -1, 10]))
+
+        with self.assertRaises(ValueError):
+            TemplateConstraint([])
+
+        with self.assertRaises(ValueError):
+            TemplateConstraint([5, -2, 10])
+
+        with self.assertRaises(ValueError):
+            TemplateConstraint([5, "word", 10])
+
+    def test_example_progression_with_wildcards(self):
+        # Test template: ["the", "", "school"]
+        # converted to token IDs: [5, -1, 10]
+        template = [5, -1, 10]
+        tc = TemplateConstraint(template)
+
+        #  "the"
+        stepped, completed, reset = tc.update(5)
+        self.assertTrue(stepped)
+        self.assertFalse(completed)
+        self.assertFalse(reset)
+        self.assertFalse(tc.completed)
+        self.assertEqual(tc.fulfilled_idx, 0)
+
+        # wildcard, any token (e.g 100)
+        stepped, completed, reset = tc.update(100)
+        self.assertTrue(stepped)
+        self.assertFalse(completed)
+        self.assertFalse(reset)
+        self.assertFalse(tc.completed)
+        self.assertEqual(tc.fulfilled_idx, 1)
+
+        #  "school"
+        stepped, completed, reset = tc.update(10)
+        self.assertTrue(stepped)
+        self.assertTrue(completed)
+        self.assertFalse(reset)
+        self.assertTrue(tc.completed)
+        self.assertEqual(tc.fulfilled_idx, 2)
+
+    def test_reset_and_remaining(self):
+        # Test template: ["the", "", "school", "", "in"]
+        template = [5, -1, 10, -1, 15]
+        tc = TemplateConstraint(template)
+
+        # Match "the"
+        stepped, completed, reset = tc.update(5)
+        self.assertTrue(stepped)
+        self.assertEqual(tc.remaining(), 4)
+
+        stepped, completed, reset = tc.update(5)
+        self.assertFalse(stepped)
+        self.assertTrue(reset)
+        self.assertEqual(tc.fulfilled_idx, 0)
+        self.assertEqual(tc.remaining(), 5)
+
+        # Test complete sequence
+        tc.update(5)  # "the"
+        tc.update(100)  # wildcard
+        tc.update(10)  # "school"
+        tc.update(200)  # wildcard
+        stepped, completed, reset = tc.update(15)  # "in"
+        self.assertTrue(completed)
+        self.assertEqual(tc.remaining(), 0)
+
+    def test_advance_and_does_advance(self):
+        template = [5, -1, 10]  # ["the", "", "school"]
+        tc = TemplateConstraint(template)
+
+        self.assertEqual(
+            .advance(), 5)
+        self.assertTrue(tc.does_advance(5))
+        self.assertFalse(tc.does_advance(6))
+
+        tc.update(5)
+
+        # this is wildcard position and so it should advance with any token
+        self.assertIsNone(tc.advance())
+        self.assertTrue(tc.does_advance(100))
+        self.assertTrue(tc.does_advance(200))
+
+        tc.update(100)
+
+        self.assertEqual(tc.advance(), 10)
+        self.assertTrue(tc.does_advance(10))
+        self.assertFalse(tc.does_advance(11))
+
+    def test_copy(self):
+        template = [5, -1, 10]
+        tc = TemplateConstraint(template)
+
+        tc.update(5)
+        tc.update(100)
+
+        copied = tc.copy(stateful=False)
+        self.assertEqual(copied.token_ids, tc.token_ids)
+        self.assertEqual(copied.fulfilled_idx, -1)  # Reset state
+        self.assertFalse(copied.completed)
+
+        stateful_copied = tc.copy(stateful=True)
+        self.assertEqual(stateful_copied.token_ids, tc.token_ids)
+        self.assertEqual(stateful_copied.fulfilled_idx, tc.fulfilled_idx)
+        self.assertEqual(stateful_copied.completed, tc.completed)

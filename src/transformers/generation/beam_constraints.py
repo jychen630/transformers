@@ -522,3 +522,289 @@ class ConstraintListState:
             new_state.pending_constraints = [constraint.copy() for constraint in self.pending_constraints]
 
         return new_state
+
+
+class TemplateConstraintBad(Constraint):
+    def __init__(self, token_ids: List[int]):
+        # How do we tokenize empty word ""?
+        super(Constraint, self).__init__()
+
+        if not isinstance(token_ids, list) or len(token_ids) == 0:
+            raise ValueError(f"`token_ids` has to be a non-empty list, but is {token_ids}.")
+        if any(not isinstance(token_id, int) for token_id in token_ids):
+            raise ValueError(f"Each list in `token_ids` has to be a list of integers, but is {token_ids}.")
+        if any(token_id < -1 for token_id in token_ids):
+            raise ValueError(f"Token IDs must be positive integers or -1, but got {token_ids}")
+
+        self.token_ids = token_ids
+
+        self.seqlen = len(self.token_ids)
+        self.fulfilled_idx = -1  # the index of the currently fulfilled step
+        self.completed = False
+
+    def advance(self):
+        """
+        When called, returns the token(s) that would take this constraint one step closer to being fulfilled.
+
+        Return:
+            token_ids (Union[int, List[int], None]):
+                - A single token ID (int) that advances the constraint, or
+                - A list of token IDs that could advance the constraint
+                - None if the constraint is completed or cannot be advanced
+        """
+        if self.completed:
+            return None
+        while self.fulfilled_idx < self.seqlen and self.token_ids[self.fulfilled_idx] == -1:
+            self.fulfilled_idx += 1
+        if self.fulfilled_idx == self.seqlen:
+            self.completed = True
+            return None
+        return self.token_ids[self.fulfilled_idx]
+
+    def does_advance(self, token_id: int):
+        if not isinstance(token_id, int):
+            raise TypeError(f"`token_id` has to be an `int`, but is {token_id} of type {type(token_id)}")
+        if self.completed:
+            return False
+        return token_id == self.token_ids[self.fulfilled_idx]
+
+    def update(self, token_id: int):
+        """
+        Reads in a token and returns booleans that indicate the progress made by it. This function will update the
+        state of this object unlikes `does_advance(self, token_id: int)`.
+
+        This isn't to test whether a certain token will advance the progress; it's to update its state as if it has
+        been generated. This becomes important if token_id != desired token (refer to else statement in
+        PhrasalConstraint)
+
+        Args:
+            token_id(`int`):
+                The id of a newly generated token in the beam search.
+        Return:
+            stepped(`bool`):
+                Whether this constraint has become one step closer to being fulfuilled.
+            completed(`bool`):
+                Whether this constraint has been completely fulfilled by this token being generated.
+            reset (`bool`):
+                Whether this constraint has reset its progress by this token being generated.
+        """
+
+        # return (stepped, completed, reset)
+        stepped = False
+        completed = False
+        reset = False
+
+        if self.does_advance(token_id=token_id):
+            stepped = True
+        else:
+            reset = True
+            self.reset()
+        return (stepped, completed, reset)
+
+    def reset(self):
+        self.completed = False
+        self.fulfilled_idx = 0
+
+    def remaining(self):
+        """
+        Returns the number of remaining steps of `advance()` in order to complete this constraint.
+        """
+        # Guess: steps <= len(token_ids). because we have wildcards that absorb one or more tokens.
+        return self.seqlen - (self.fulfilled_idx + 1)  # this is wrong?
+
+    def copy(self, stateful=False):
+        """
+        Creates a new instance of this constraint.
+
+        Args:
+            stateful(`bool`): Whether to not only copy the constraint for new instance, but also its state.
+
+        Return:
+            constraint(`Constraint`): The same constraint as the one being called from.
+        """
+
+        new_constraint = TemplateConstraint(self.token_ids)
+        if stateful:
+            new_constraint.seq_len = self.seqlen  # interesting, seq_len but not seqlen. want to know where it's used
+            new_constraint.fulfilled_idx = self.fulfilled_idx
+            new_constraint.completed = self.completed
+        return new_constraint
+
+
+# Junyao's notes:
+# In tests/generation/test_beam_constraints.py
+# they do not have test cases for phrasal constraint.
+# Their ConstraintTest is sole used for DisjunctiveConstraint
+
+class TemplateTrie:
+    def __init__(self, token_segments: List[List[int]], max_gap_len: int = 5):
+        """
+        token_segments: tokenized template where [-1] represents a wildcard (gap).
+        max_gap_len: maximum number of tokens allowed in a wildcard gap.
+        """
+        self.max_gap_len = max_gap_len
+        self.root = {}
+        self._build_trie(token_segments)
+        self.max_height = self._compute_max_height(token_segments)
+
+    def _build_trie(self, token_segments):
+        node = self.root
+        for segment in token_segments:
+            if segment == [-1]:
+                # Wildcard node
+                if -1 not in node:
+                    node[-1] = {}
+                node = node[-1]
+            else:
+                for token_id in segment:
+                    if token_id not in node:
+                        node[token_id] = {}
+                    node = node[token_id]
+        # Terminal node
+        node[None] = {}  # Used like leaf in DisjunctiveTrie
+
+    def _compute_max_height(self, token_segments):
+        fixed_tokens = sum(len(s) for s in token_segments if s != [-1])
+        gaps = token_segments.count([-1])
+        return fixed_tokens + gaps * self.max_gap_len
+
+    def next_tokens(self, current_seq):
+        """
+        Given a sequence of tokens, return the possible next tokens.
+        """
+        node = self.root
+        path = []
+        wildcards = []
+
+        for token in current_seq:
+            if token in node:
+                path.append((node, token))
+                node = node[token]
+            elif -1 in node:
+                wildcards.append((node, token))
+                node = node[-1]
+            else:
+                return []
+
+        result = list(node.keys())
+        if None in result:
+            result.remove(None)
+
+        return result
+
+    def reached_leaf(self, current_seq):
+        """
+        Checks if the current sequence reaches a complete template match.
+        """
+        node = self.root
+        for token in current_seq:
+            if token in node:
+                node = node[token]
+            elif -1 in node:
+                node = node[-1]
+            else:
+                return False
+        return None in node
+
+
+class TemplateConstraint(Constraint):
+    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+    model_name = "gpt2-xl"
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+
+    def __init__(self, token_segments: List[List[int]], max_gap_len: int = 5):
+        """
+        token_segments: template like [["the"], [-1], ["School", "of"], [-1], ["in"]]
+        max_gap_len: upper bound on number of tokens a wildcard can absorb.
+        """
+        super(Constraint, self).__init__()
+
+        if not token_segments:
+            raise ValueError("`token_segments` must be a non-empty list of token ID sequences.")
+        self.token_segments = token_segments
+        self.token_ids = [[token_id for token_id in segment if token_id != -1] for segment in token_segments if segment != [-1]]
+
+        self.trie = TemplateTrie(self.token_segments, max_gap_len=max_gap_len)
+        self.max_gap_len = max_gap_len
+
+        self.current_seq = []
+        self.gap_counts = []  # How many tokens we've consumed in current wildcard
+        self.completed = False
+        self.seqlen = self.trie.max_height
+
+    def advance(self):
+        if self.completed:
+            return None
+        return self.trie.next_tokens(self.current_seq)
+
+    def does_advance(self, token_id: int):
+        if self.completed:
+            return False
+
+        next_options = self.trie.next_tokens(self.current_seq)
+        if token_id in next_options:
+            return True
+
+        # Special case: we're inside a wildcard
+        if -1 in next_options:
+            if self._within_gap_limit():
+                return True
+        return False
+
+    def _within_gap_limit(self):
+        """
+        Returns True if we are currently inside a wildcard and haven't exceeded gap length.
+        """
+        wildcard_depth = sum(1 for seg in self.token_ids if seg == [-1])
+        return len(self.gap_counts) < wildcard_depth or self.gap_counts[-1] < self.max_gap_len
+
+    def update(self, token_id: int):
+        stepped = False
+        completed = False
+        reset = False
+
+        next_options = self.trie.next_tokens(self.current_seq)
+
+        if token_id in next_options:
+            self.current_seq.append(token_id)
+            stepped = True
+            if -1 in next_options:
+                # Leaving a wildcard: reset gap count
+                if self.gap_counts:
+                    self.gap_counts.pop()
+        elif -1 in next_options and self._within_gap_limit():
+            self.current_seq.append(token_id)
+            if not self.gap_counts or len(self.gap_counts) < len(self.current_seq):
+                self.gap_counts.append(1)
+            else:
+                self.gap_counts[-1] += 1
+            stepped = True
+        else:
+            self.reset()
+            reset = True
+            return stepped, completed, reset
+
+        if self.trie.reached_leaf(self.current_seq):
+            self.completed = True
+            completed = True
+
+        return stepped, completed, reset
+
+    def reset(self):
+        self.current_seq = []
+        self.gap_counts = []
+        self.completed = False
+
+    def remaining(self):
+        if self.completed:
+            return 0
+        return self.seqlen - len(self.current_seq)
+
+    def copy(self, stateful=False):
+        new_constraint = TemplateConstraint(self.token_ids, max_gap_len=self.max_gap_len)
+        if stateful:
+            new_constraint.current_seq = list(self.current_seq)
+            new_constraint.gap_counts = list(self.gap_counts)
+            new_constraint.completed = self.completed
+        return new_constraint

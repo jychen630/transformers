@@ -40,6 +40,7 @@ else:
         "ConstraintListState",
         "DisjunctiveConstraint",
         "PhrasalConstraint",
+        "TemplateConstraint",
     ]
     _import_structure["beam_search"] = [
         "BeamHypotheses",
