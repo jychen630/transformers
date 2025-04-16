@@ -31,6 +31,7 @@ NOT_DEVICE_TESTS = {
     "test_processor",
     "test_processing",
     "test_beam_constraints",
+    "test_template_constraints",
     "test_configuration_utils",
     "test_data_collator",
     "test_trainer_callback",
