@@ -2382,10 +2382,13 @@ class GenerationMixin:
             )
 
         elif generation_mode == GenerationMode.CONSTRAINED_BEAM_SEARCH:
+            print("CONSTRAINED_BEAM_SEARCH")
             final_constraints = []
             if generation_config.constraints is not None:
+                print("generation_config.constraints is not None")
                 final_constraints = generation_config.constraints
-
+                print("len(final_constraints)", len(final_constraints))
+                print("final_constraints", final_constraints) # this is a list of TemplateConstraint objects
             if generation_config.force_words_ids is not None:
 
                 def typeerror():
@@ -2399,8 +2402,10 @@ class GenerationMixin:
                     or len(generation_config.force_words_ids) == 0
                 ):
                     typeerror()
-
+                print("generation_config.force_words_ids", generation_config.force_words_ids)
+                print("for word_ids in generation_config.force_words_ids")
                 for word_ids in generation_config.force_words_ids:
+                    print("word_ids", word_ids)
                     if isinstance(word_ids[0], list):
                         if not isinstance(word_ids, list) or len(word_ids) == 0:
                             typeerror()
@@ -2411,18 +2416,24 @@ class GenerationMixin:
                             for token_ids in word_ids
                         ):
                             typeerror()
-
+                        print("word_ids[0] is a list: ", word_ids[0])
+                        print("DisjunctiveConstraint(word_ids)")
                         constraint = DisjunctiveConstraint(word_ids)
                     else:
                         if not isinstance(word_ids, list) or len(word_ids) == 0:
                             typeerror()
                         if any((not isinstance(token_id, int) or token_id < 0) for token_id in word_ids):
                             typeerror()
-
+                        print("word_ids is a list: ", word_ids)
+                        print("PhrasalConstraint(word_ids)")
                         constraint = PhrasalConstraint(word_ids)
                     final_constraints.append(constraint)
-
+            else:   
+                print("generation_config.force_words_ids is None")
+            print("len(final_constraints)", len(final_constraints))
+            print("final_constraints", final_constraints)  # list of TemplateConstraint objects
             # 11. prepare beam search scorer
+            print("ConstrainedBeamSearchScorer(final_constraints)")
             constrained_beam_scorer = ConstrainedBeamSearchScorer(
                 constraints=final_constraints,
                 batch_size=batch_size,

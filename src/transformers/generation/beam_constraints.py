@@ -1,6 +1,23 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Set
+import logging
+from datetime import datetime
+import os
+os.makedirs("logs", exist_ok=True)
+# Set up logging
+logger = logging.getLogger('template_constraint')
+logger.setLevel(logging.INFO)
 
+# Create file handler
+file_handler = logging.FileHandler(f'logs/template_constraint-{datetime.now().strftime("%Y%m%d-%H%M%S")}.log')
+file_handler.setLevel(logging.INFO)
+
+# Create formatter
+formatter = logging.Formatter('%(asctime)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add handler to logger
+logger.addHandler(file_handler)
 
 class Constraint(ABC):
     r"""Abstract base class for all constraints that can be applied during generation.
@@ -524,7 +541,7 @@ class ConstraintListState:
         return new_state
 
 
-class TemplateConstraint(Constraint):
+class TemplateConstraintSlow(Constraint):
     r"""
     Enforces generation according to a template with fixed and variable parts.
 
@@ -536,123 +553,269 @@ class TemplateConstraint(Constraint):
     """
 
     def __init__(self, template_parts: List[List[int]], all_token_ids: List[int]):
+        # template_parts = [[262], [], [], [2059], [], [287]]
         super(Constraint, self).__init__()
+        logger.info(f"[__init__] Initializing with template_parts={template_parts}")
+        logger.info(f"[__init__] Number of all_token_ids: {len(all_token_ids)}") #50257
 
-        self.template = template_parts
+        self.template = template_parts  # 6
         self.all_token_ids = all_token_ids
         self.current_part = 0
         self.active_constraint = None
         self.next_forbidden = None
         self.completed = False
         self.seqlen = sum(len(part) if part else 1 for part in template_parts)
+        logger.info(f"[__init__] Expected sequence length: {self.seqlen}") #6
         self._init_next_constraint()
 
     def _init_next_constraint(self):
-        """Initialize the current part (fixed or variable)."""
+        logger.info(f"[__init_next_constraint] Current part: {self.current_part}")
         if self.current_part >= len(self.template):
+            logger.info("[__init_next_constraint] All parts completed, marking as done")
             self.completed = True
             return
 
         current_part = self.template[self.current_part]
+        logger.info(f"[__init_next_constraint] Processing part: {current_part}")
         if current_part:
+            logger.info("[__init_next_constraint] Initializing PhrasalConstraint for fixed part")
             self.active_constraint = PhrasalConstraint(current_part)
             self.next_forbidden = None
         else:
             next_fixed = self._get_next_fixed()
+            logger.info(f"[__init_next_constraint] Variable part, next fixed tokens: {next_fixed}")
             self.next_forbidden = next_fixed[0] if next_fixed else None
             self.active_constraint = None
 
     def _get_next_fixed(self):
-        """Find the next fixed part after current_part."""
+        logger.info(f"[__get_next_fixed] Searching for next fixed part after {self.current_part}")
         for i in range(self.current_part + 1, len(self.template)):
             part = self.template[i]
             if part:
+                logger.info(f"[__get_next_fixed] Found next fixed part: {part}")
                 return part
+        logger.info("[__get_next_fixed] No more fixed parts found")
         return None
 
     def advance(self):
+        logger.info(f"[__advance] Current state - part: {self.current_part}, completed: {self.completed}")
         if self.completed:
+            logger.info("[__advance] Already completed, returning None")
             return None
 
         if self.active_constraint:
+            logger.info("[__advance] Delegating to active constraint")
             return self.active_constraint.advance()
         else:
             if self.next_forbidden is not None:
-                return [tid for tid in self.all_token_ids if tid != self.next_forbidden]
+                logger.info(f"[__advance] Variable part with forbidden token: {self.next_forbidden}")
+                get_top_k(self.all_token_ids, k = 5)
+                allowed = [tid for tid in self.all_token_ids if tid != self.next_forbidden]
+                logger.info(f"[__advance] Number of allowed tokens: {len(allowed)}")
+                return allowed
             else:
+                logger.info("[__advance] Variable part with no restrictions")
                 return self.all_token_ids.copy()
 
     def does_advance(self, token_id: int):
+        logger.info(f"[__does_advance] Checking token_id: {token_id}")
         if self.completed:
+            logger.info("[__does_advance] Already completed, returning False")
             return False
 
         if self.active_constraint:
-            return self.active_constraint.does_advance(token_id)
+            result = self.active_constraint.does_advance(token_id)
+            logger.info(f"[__does_advance] Active constraint result: {result}")
+            return result
         else:
-            return token_id != self.next_forbidden if self.next_forbidden is not None else True
+            result = token_id != self.next_forbidden if self.next_forbidden is not None else True
+            logger.info(f"[__does_advance] Variable part result: {result}")
+            return result
 
     def update(self, token_id: int):
+        logger.info(f"[__update] Processing token_id: {token_id}")
         stepped = False
         completed = False
         reset = False
 
         if self.completed:
+            logger.info("[__update] Already completed")
             return stepped, completed, reset
 
         if self.active_constraint:
-            # Update the active fixed constraint
+            logger.info("[__update] Updating active constraint")
             stepped, part_completed, reset = self.active_constraint.update(token_id)
+            logger.info(f"[__update] Active constraint result - stepped: {stepped}, completed: {part_completed}, reset: {reset}")
 
             if part_completed:
+                logger.info("[__update] Fixed part completed, moving to next part")
                 self.current_part += 1
                 self._init_next_constraint()
                 if self.current_part >= len(self.template):
+                    logger.info("[__update] All parts completed")
                     self.completed = True
             elif reset:
-                # Reset the constraint and backtrack
+                logger.info("[__update] Resetting active constraint")
                 self.active_constraint.reset()
                 reset = True
         else:
-            # variable 
+            logger.info("[__update] Processing variable part")
             if self.does_advance(token_id):
                 stepped = True
                 self.current_part += 1
+                logger.info(f"[__update] Variable part accepted, moving to part {self.current_part}")
                 self._init_next_constraint()
                 if self.current_part >= len(self.template):
+                    logger.info("[__update] All parts completed")
                     self.completed = True
             else:
+                logger.info("[__update] Invalid token for variable part, resetting")
                 reset = True
                 self.reset()
 
-        # completion
         if self.current_part >= len(self.template):
+            logger.info("[__update] Template generation completed")
             self.completed = True
 
+        logger.info(f"[__update] Final result - stepped: {stepped}, completed: {self.completed}, reset: {reset}")
         return stepped, self.completed, reset
 
     def reset(self):
+        logger.info("[__reset] Resetting constraint state")
         self.current_part = 0
         self.completed = False
         self._init_next_constraint()
         if self.active_constraint:
+            logger.info("[__reset] Resetting active constraint")
             self.active_constraint.reset()
+
+    def remaining(self):
+        logger.info(f"[__remaining] Checking remaining tokens from part {self.current_part}")
+        if self.completed:
+            logger.info("[__remaining] Already completed, returning 0")
+            return 0
+        remaining = 0
+        for part in self.template[self.current_part:]:
+            remaining += len(part) if part else 1
+        logger.info(f"[__remaining] Tokens remaining: {remaining}")
+        return remaining
+
+    def copy(self, stateful=False):
+        logger.info(f"[__copy] Creating copy with stateful={stateful}")
+        new_constraint = TemplateConstraint(self.template, self.all_token_ids)
+        if stateful:
+            logger.info("[__copy] Copying current state")
+            new_constraint.current_part = self.current_part
+            new_constraint.completed = self.completed
+            new_constraint.next_forbidden = self.next_forbidden
+            new_constraint.seqlen = self.seqlen
+            new_constraint.active_constraint = (
+                self.active_constraint.copy(stateful=True) if self.active_constraint else None
+            )
+        return new_constraint
+
+
+class TrieNode:
+    def __init__(self):
+        self.children = {}  # Map of token_id to TrieNode
+        self.is_variable = False  # Marks if this node represents a variable token
+        self.is_end = False  # Marks if this node completes a valid template
+        self.forbidden_next = None  # Token that cannot follow this node (for variable parts)
+
+class TemplateConstraint(Constraint):
+    def __init__(self, template_parts: List[List[int]], all_token_ids: List[int]):
+        super(Constraint, self).__init__()
+        self.template = template_parts
+        self.all_token_ids = all_token_ids
+        self.root = self._build_trie(template_parts)
+        self.current_node = self.root
+        self.completed = False
+        self.seqlen = sum(len(part) if part else 1 for part in template_parts)
+
+    def _build_trie(self, template_parts: List[List[int]]) -> TrieNode:
+        root = TrieNode()
+        current = root
+        
+        for i, part in enumerate(template_parts):
+            if not part:  # Variable part
+                new_node = TrieNode()
+                new_node.is_variable = True
+                # Find next fixed part's first token to forbid
+                for j in range(i + 1, len(template_parts)):
+                    if template_parts[j]:
+                        new_node.forbidden_next = template_parts[j][0]
+                        break
+                # Create a separate node for each allowed token
+                for tid in self.all_token_ids:
+                    if new_node.forbidden_next is None or tid != new_node.forbidden_next:
+                        token_node = TrieNode()
+                        token_node.is_end = (i == len(template_parts) - 1)
+                        current.children[tid] = token_node
+                # Move to next part without changing current
+                continue
+            else:  # Fixed part
+                for token_id in part:
+                    new_node = TrieNode()
+                    current.children[token_id] = new_node
+                    current = new_node
+        
+        current.is_end = True
+        print(f"[TemplateConstraint] Trie built with {len(self.all_token_ids)} tokens")
+        return root
+    
+    def _get_next_fixed_start(self, template_parts: List[List[int]], current_part: List[int]) -> Set[int]:
+        print(f"[TemplateConstraint] Getting next fixed start for {current_part}")
+        start_idx = template_parts.index(current_part)
+        for part in template_parts[start_idx + 1:]:
+            if part:  # Found next fixed part
+                return {part[0]}  # Return first token of next fixed part
+        return set()  # No more fixed parts
+    
+    def advance(self):
+        if self.completed:
+            return None
+            
+        valid_tokens = list(self.current_node.children.keys())
+        if not valid_tokens:
+            return self.all_token_ids.copy()
+        print(f"[TemplateConstraint] Advancing with {len(valid_tokens)} options")  
+        return valid_tokens
+
+    def does_advance(self, token_id: int):
+        if self.completed:
+            return False
+        return token_id in self.current_node.children
+
+    def update(self, token_id: int):
+        if self.completed:
+            return False, True, False
+            
+        if token_id not in self.current_node.children:
+            print(f"[TemplateConstraint] Invalid token {token_id}, resetting")
+            self.reset()
+            return False, False, True
+            
+        self.current_node = self.current_node.children[token_id]
+        stepped = True
+        completed = self.current_node.is_end
+        self.completed = completed
+        
+        return stepped, completed, False
+
+    def reset(self):
+        print("[TemplateConstraint] Resetting to root node")
+        self.current_node = self.root
+        self.completed = False
 
     def remaining(self):
         if self.completed:
             return 0
-        remaining = 0
-        for part in self.template[self.current_part:]:
-            remaining += len(part) if part else 1  # Fixed tokens or 1 per variable
-        return remaining
+        return self.seqlen
 
     def copy(self, stateful=False):
         new_constraint = TemplateConstraint(self.template, self.all_token_ids)
         if stateful:
-            new_constraint.current_part = self.current_part
+            new_constraint.current_node = self.current_node
             new_constraint.completed = self.completed
-            new_constraint.next_forbidden = self.next_forbidden
-            new_constraint.seqlen = self.seqlen  # Include seqlen in stateful copy
-            new_constraint.active_constraint = (
-                self.active_constraint.copy(stateful=True) if self.active_constraint else None
-            )
+            new_constraint.seqlen = self.seqlen
         return new_constraint
