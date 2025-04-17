@@ -238,7 +238,7 @@ class DisjunctiveTrie:
             start = start[current_token]
 
         next_tokens = list(start.keys())
-
+        print(f"next_tokens: {next_tokens}")
         return next_tokens
 
     def reached_leaf(self, current_seq):
@@ -295,9 +295,9 @@ class DisjunctiveConstraint(Constraint):
 
     def advance(self):
         token_list = self.trie.next_tokens(self.current_seq)
-
+        
         if len(token_list) == 0:
-            return None
+            return []
         else:
             return token_list
 
@@ -310,14 +310,13 @@ class DisjunctiveConstraint(Constraint):
         return token_id in next_tokens
 
     def update(self, token_id: int):
-        if not isinstance(token_id, int):
-            raise TypeError(f"`token_id` is supposed to be type `int`, but is {token_id} of type {type(token_id)}")
-
         stepped = False
         completed = False
         reset = False
 
-        if self.does_advance(token_id):
+        next_tokens = self.trie.next_tokens(self.current_seq)
+        if self.WILDCARD in next_tokens or token_id in next_tokens:
+            # FIX: append actual token_id, not WILDCARD again
             self.current_seq.append(token_id)
             stepped = True
         else:
@@ -326,7 +325,6 @@ class DisjunctiveConstraint(Constraint):
 
         completed = self.trie.reached_leaf(self.current_seq)
         self.completed = completed
-
         return stepped, completed, reset
 
     def reset(self):
@@ -707,7 +705,7 @@ class TemplateTrie:
         return None in node
 
 
-class TemplateConstraint(Constraint):
+class TemplateConstraintBad2(Constraint):
     from transformers import GPT2LMHeadModel, GPT2Tokenizer
     model_name = "gpt2-xl"
     model = GPT2LMHeadModel.from_pretrained(model_name)
@@ -808,3 +806,65 @@ class TemplateConstraint(Constraint):
             new_constraint.gap_counts = list(self.gap_counts)
             new_constraint.completed = self.completed
         return new_constraint
+
+
+WILDCARD = -1
+
+class TemplateConstraint(Constraint):
+    def __init__(self, template_tokens: List[Optional[int]], vocab_size: int = 50257):
+        super(Constraint, self).__init__()
+
+        self.vocab_size = vocab_size
+        self.WILDCARD = WILDCARD
+        self.template_tokens = [self.WILDCARD if t is None else t for t in template_tokens]
+
+        self.trie = DisjunctiveTrie([self.template_tokens])
+        self.current_seq = []
+        self.completed = False
+        self.seqlen = len(template_tokens)
+
+    def advance(self):
+        if self.completed:
+            return []
+
+        next_tokens = self.trie.next_tokens(self.current_seq)
+        if self.WILDCARD in next_tokens:
+            return list(range(self.vocab_size))  # wildcard = allow all tokens
+        return next_tokens
+
+    def does_advance(self, token_id: int):
+        if self.completed:
+            return False
+        next_tokens = self.trie.next_tokens(self.current_seq)
+        return self.WILDCARD in next_tokens or token_id in next_tokens
+
+    def update(self, token_id: int):
+        stepped = False
+        completed = False
+        reset = False
+
+        next_tokens = self.trie.next_tokens(self.current_seq)
+        if self.WILDCARD in next_tokens or token_id in next_tokens:
+            self.current_seq.append(token_id if token_id in next_tokens else self.WILDCARD)
+            stepped = True
+        else:
+            reset = True
+            self.reset()
+
+        completed = self.trie.reached_leaf(self.current_seq)
+        self.completed = completed
+        return stepped, completed, reset
+
+    def reset(self):
+        self.current_seq = []
+        self.completed = False
+
+    def remaining(self):
+        return self.seqlen - len(self.current_seq)
+
+    def copy(self, stateful=False):
+        new = TemplateConstraint(self.template_tokens, vocab_size=self.vocab_size)
+        if stateful:
+            new.current_seq = list(self.current_seq)
+            new.completed = self.completed
+        return new
