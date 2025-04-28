@@ -724,7 +724,11 @@ class ConstrainedBeamSearchScorer(BeamScorer):
             advance_state.reset(pre_seq.cpu().tolist())
 
             if not advance_state.completed:
-                advance_tokens = torch.LongTensor(advance_state.advance()).to(device)
+                advance_state_raw = advance_state.advance()
+                if advance_state_raw is None or len(advance_state_raw) == 0:
+                    continue
+                advance_long = torch.LongTensor(advance_state_raw)
+                advance_tokens = advance_long.to(device)
                 for advance_token in advance_tokens:
                     # since adding each `advance_token` leads to a different hypothesis, create new state instance.
                     new_state = advance_state.copy(stateful=True)
