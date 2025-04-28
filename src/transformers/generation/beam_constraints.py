@@ -525,134 +525,47 @@ class ConstraintListState:
 
 
 class TemplateConstraint(Constraint):
-    r"""
-    Enforces generation according to a template with fixed and variable parts.
-
-    Args:
-        template_parts (List[List[int]]): List where each element is either:
-            - Non-empty list: Fixed token sequence (must be generated exactly)
-            - Empty list: Variable part (exactly one token, not starting next fixed part)
-        all_token_ids (List[int]): List of all possible token IDs in the vocab.
-    """
-
-    def __init__(self, template_parts: List[List[int]], all_token_ids: List[int]):
-        super(Constraint, self).__init__()
-
-        self.template = template_parts
-        self.all_token_ids = all_token_ids
-        self.current_part = 0
-        self.active_constraint = None
-        self.next_forbidden = None
+    def __init__(self, template: List[Optional[int]], vocab_length: int):
+        
+        self.template = template
+        self.seqlen = len(template)
+        self.position = 0
         self.completed = False
-        self.seqlen = sum(len(part) if part else 1 for part in template_parts)
-        self._init_next_constraint()
-
-    def _init_next_constraint(self):
-        """Initialize the current part (fixed or variable)."""
-        if self.current_part >= len(self.template):
-            self.completed = True
-            return
-
-        current_part = self.template[self.current_part]
-        if current_part:
-            self.active_constraint = PhrasalConstraint(current_part)
-            self.next_forbidden = None
-        else:
-            next_fixed = self._get_next_fixed()
-            self.next_forbidden = next_fixed[0] if next_fixed else None
-            self.active_constraint = None
-
-    def _get_next_fixed(self):
-        """Find the next fixed part after current_part."""
-        for i in range(self.current_part + 1, len(self.template)):
-            part = self.template[i]
-            if part:
-                return part
-        return None
+        self.vocab_length = vocab_length
+        super().__init__()
 
     def advance(self):
         if self.completed:
-            return None
-
-        if self.active_constraint:
-            return self.active_constraint.advance()
+            return []
+        if self.template[self.position] is None:
+            return list(range(self.vocab_length))
         else:
-            if self.next_forbidden is not None:
-                return [tid for tid in self.all_token_ids if tid != self.next_forbidden]
-            else:
-                return self.all_token_ids.copy()
+            return self.template[self.position]
 
     def does_advance(self, token_id: int):
         if self.completed:
             return False
-
-        if self.active_constraint:
-            return self.active_constraint.does_advance(token_id)
-        else:
-            return token_id != self.next_forbidden if self.next_forbidden is not None else True
+        expected = self.template[self.position]
+        return expected is None or expected == token_id
 
     def update(self, token_id: int):
-        stepped = False
-        completed = False
-        reset = False
-
-        if self.completed:
-            return stepped, completed, reset
-
-        if self.active_constraint:
-            # Update the active fixed constraint
-            stepped, part_completed, reset = self.active_constraint.update(token_id)
-
-            if part_completed:
-                self.current_part += 1
-                self._init_next_constraint()
-                if self.current_part >= len(self.template):
-                    self.completed = True
-            elif reset:
-                # Reset the constraint and backtrack
-                self.active_constraint.reset()
-                reset = True
-        else:
-            # variable 
-            if self.does_advance(token_id):
-                stepped = True
-                self.current_part += 1
-                self._init_next_constraint()
-                if self.current_part >= len(self.template):
-                    self.completed = True
-            else:
-                reset = True
-                self.reset()
-
-        # completion
-        if self.current_part >= len(self.template):
-            self.completed = True
-
-        return stepped, self.completed, reset
+        if not self.does_advance(token_id):
+            self.reset()
+            return False, False, True
+        self.position += 1
+        self.completed = self.position == self.seqlen
+        return True, self.completed, False
 
     def reset(self):
-        self.current_part = 0
+        self.position = 0
         self.completed = False
-        self._init_next_constraint()
-        if self.active_constraint:
-            self.active_constraint.reset()
 
     def remaining(self):
-        if self.completed:
-            return 0
-        remaining = 0
-        for part in self.template[self.current_part:]:
-            remaining += len(part) if part else 1  # Fixed tokens or 1 per variable
-        return remaining
+        return self.seqlen - self.position
 
     def copy(self, stateful=False):
-        new_constraint = TemplateConstraint(self.template, self.all_token_ids)
+        new = TemplateConstraint(self.template, self.vocab_length)
         if stateful:
-            new_constraint.current_part = self.current_part
-            new_constraint.completed = self.completed
-            new_constraint.next_forbidden = self.next_forbidden
-            new_constraint.seqlen = self.seqlen  # Include seqlen in stateful copy
-            new_constraint.active_constraint = (
-                self.active_constraint.copy(stateful=True) if self.active_constraint else None
-            )
-        return new_constraint
+            new.position = self.position
+            new.completed = self.completed
+        return new
