@@ -57,8 +57,8 @@
     </div>
 
     <div class="section">
-        <h3>Constraint Template:</h3>
-        <p id="constraint">["the", "", "School of", "", "in"]</p>
+        <h3>Constraint Templates:</h3>
+        <div id="constraints"></div>
     </div>
 
     <div class="section">
@@ -80,7 +80,14 @@
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById("model-name").textContent = data.model_name;
-                    document.getElementById("constraint").textContent = JSON.stringify(data.constraint);
+
+                    const constraintsContainer = document.getElementById("constraints");
+                    constraintsContainer.innerHTML = "";
+                    data.constraint.forEach((constraint, index) => {
+                        const p = document.createElement("p");
+                        p.textContent = `Constraint ${index + 1}: ${JSON.stringify(constraint)}`;
+                        constraintsContainer.appendChild(p);
+                    });
 
                     const outputContainer = document.getElementById("outputs");
                     outputContainer.innerHTML = "";
@@ -88,7 +95,7 @@
                     data.outputs.forEach(output => {
                         const div = document.createElement("div");
                         div.className = "output";
-                        div.innerHTML = highlightConstraints(output, data.constraint.filter(w => w));
+                        div.innerHTML = highlightConstraints(output, data.constraint.flat().filter(w => w));
                         outputContainer.appendChild(div);
                     });
                 });

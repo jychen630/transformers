@@ -1,14 +1,27 @@
 {
   "model_name": "gpt2-xl",
   "constraint": [
-    "the",
-    "",
-    "School of",
-    "",
-    "in"
+    [
+      " the",
+      "",
+      " School",
+      " of",
+      "",
+      " in"
+    ],
+    [
+      " the",
+      "",
+      " University",
+      "",
+      " in"
+    ]
   ],
   "outputs": [
-    "The woman, whotheSchoolTimes identified as a student at the school in West Des Moines said she was walking",
-    "The woman, whotheSchoolTimes identified as a student at the school in West Des Moines said she wasthe"
+    "The woman attended the same School of Music in New York City, where she was a member of the",
+    "The woman attended the same School of Music in New York City, where she was a member of a",
+    "The woman attended the same School of Music in New York City, where she studied piano, violin,",
+    "The woman attended the same School of Music in New York City, where she was a student in the",
+    "The woman attended the same School of Music in New York City, where she was a member of an"
   ]
 }
