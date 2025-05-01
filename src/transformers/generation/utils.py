@@ -96,6 +96,7 @@ from .logits_process import (
     TopPLogitsWarper,
     TypicalLogitsWarper,
     UnbatchedClassifierFreeGuidanceLogitsProcessor,
+    TemplateConstraintLogitsProcessor,
 )
 from .stopping_criteria import (
     ConfidenceCriteria,
@@ -927,6 +928,7 @@ class GenerationMixin:
         model_kwargs: Optional[Dict[str, Any]] = None,
         negative_prompt_ids: Optional[torch.Tensor] = None,
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
+        constraints: Optional[List[str]] = None,
     ) -> LogitsProcessorList:
         """
         This class returns a [`LogitsProcessorList`] list object that contains all relevant [`LogitsProcessor`]
@@ -1145,6 +1147,10 @@ class GenerationMixin:
         # `LogitNormalization` should always be the last logit processor, when present
         if generation_config.renormalize_logits is True:
             processors.append(LogitNormalization())
+        
+        if constraints is not None:
+            for constraint in constraints:
+                processors.append(TemplateConstraintLogitsProcessor(template=constraint.template, vocab_size=self.config.vocab_size))
         return processors
 
     def _get_stopping_criteria(
@@ -2226,6 +2232,7 @@ class GenerationMixin:
             model_kwargs=model_kwargs,
             negative_prompt_ids=negative_prompt_ids,
             negative_prompt_attention_mask=negative_prompt_attention_mask,
+            constraints=kwargs.get("constraints", [])
         )
         prepared_stopping_criteria = self._get_stopping_criteria(
             generation_config=generation_config, stopping_criteria=stopping_criteria, tokenizer=tokenizer, **kwargs

@@ -2942,3 +2942,24 @@ class SynthIDTextWatermarkLogitsProcessor(LogitsProcessor):
             The expected mean g-value for watermarked text.
         """
         return coinflip_prob + coinflip_prob * (1 - coinflip_prob) * (1 - (1 / vocab_size))
+
+
+class TemplateConstraintLogitsProcessor(LogitsProcessor):
+    def __init__(self, template, vocab_size):
+        self.template = template
+        self.vocab_size = vocab_size
+        self.position = 0
+
+    def __call__(self, input_ids, scores):
+        if self.position >= len(self.template):
+            return scores 
+
+        expected = self.template[self.position]
+        self.position += 1
+
+        if expected is None:
+            return scores
+        else:
+            mask = torch.full_like(scores, -float('inf'))
+            mask[..., expected] = 0 
+            return scores + mask
