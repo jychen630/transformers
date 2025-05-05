@@ -532,6 +532,7 @@ class TemplateConstraint(Constraint):
         self.position = 0
         self.completed = False
         super().__init__()
+        self.reset()
 
     def advance(self):
         if self.completed:
