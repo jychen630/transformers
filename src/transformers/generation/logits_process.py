@@ -2963,3 +2963,21 @@ class TemplateConstraintLogitsProcessor(LogitsProcessor):
             mask = torch.full_like(scores, -float('inf'))
             mask[..., expected] = 0 
             return scores + mask
+
+class SimpleOrderedConstraintLogitsProcessor(LogitsProcessor):
+    def __init__(self, ordered_token_ids, vocab_size):
+        self.ordered_token_ids = ordered_token_ids
+        self.vocab_size = vocab_size
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        position = input_ids.shape[1]  # current position in generation
+
+        if position >= len(self.ordered_token_ids):
+            return scores  # all constraints satisfied
+
+        expected_token = self.ordered_token_ids[position]
+
+        # Mask all tokens except the expected one
+        mask = torch.full_like(scores, -float("inf"))
+        mask[:, expected_token] = 0.0
+        return scores + mask
