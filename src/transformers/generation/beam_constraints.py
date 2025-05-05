@@ -525,20 +525,19 @@ class ConstraintListState:
 
 
 class TemplateConstraint(Constraint):
-    def __init__(self, template: List[Optional[int]], vocab_length: int):
+    def __init__(self, template: List[Optional[int]]):
         
         self.template = template
         self.seqlen = len(template)
         self.position = 0
         self.completed = False
-        self.vocab_length = vocab_length
         super().__init__()
 
     def advance(self):
         if self.completed:
             return []
         if self.template[self.position] is None:
-            return list(range(self.vocab_length))
+            return None
         else:
             return self.template[self.position]
 
@@ -564,7 +563,7 @@ class TemplateConstraint(Constraint):
         return self.seqlen - self.position
 
     def copy(self, stateful=False):
-        new = TemplateConstraint(self.template, self.vocab_length)
+        new = TemplateConstraint(self.template)
         if stateful:
             new.position = self.position
             new.completed = self.completed
