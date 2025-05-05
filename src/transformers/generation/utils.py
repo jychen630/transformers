@@ -97,6 +97,7 @@ from .logits_process import (
     TypicalLogitsWarper,
     UnbatchedClassifierFreeGuidanceLogitsProcessor,
     TemplateConstraintLogitsProcessor,
+    SimpleOrderedConstraintLogitsProcessor,
 )
 from .stopping_criteria import (
     ConfidenceCriteria,
@@ -1148,9 +1149,12 @@ class GenerationMixin:
         if generation_config.renormalize_logits is True:
             processors.append(LogitNormalization())
         
+        # if constraints is not None:
+        #     for constraint in constraints:
+        #         processors.append(TemplateConstraintLogitsProcessor(template=constraint.template, vocab_size=self.config.vocab_size))
         if constraints is not None:
-            for constraint in constraints:
-                processors.append(TemplateConstraintLogitsProcessor(template=constraint.template, vocab_size=self.config.vocab_size))
+              for constraint in constraints:
+                  processors.append(SimpleOrderedConstraintLogitsProcessor(ordered_token_ids=constraint.ordered_token_ids, vocab_size=self.config.vocab_size))
         return processors
 
     def _get_stopping_criteria(
