@@ -526,7 +526,6 @@ class ConstraintListState:
 
 class TemplateConstraint(Constraint):
     def __init__(self, template: List[Optional[int]]):
-        
         self.template = template
         self.seqlen = len(template)
         self.position = 0

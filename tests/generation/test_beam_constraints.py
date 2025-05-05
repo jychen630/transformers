@@ -117,115 +117,146 @@ class ConstraintTest(unittest.TestCase):
 
 @require_torch
 class TemplateConstraintTest(unittest.TestCase):
-    def test_input_types(self):
-        # Test valid template: ["the", "", "School of", "", "in"]
-        template = [5, -1, 10, 20, -1, 15]
-        tc = TemplateConstraint(template)
-        self.assertTrue(isinstance(tc.token_ids, list))
+    def test_initialization(self):
+        template = [5, None, 3]
+        constraint = TemplateConstraint(template)
+        self.assertEqual(constraint.template, template)
+        self.assertEqual(constraint.seqlen, 3)
+        self.assertEqual(constraint.position, 0)
+        self.assertFalse(constraint.completed)
+    
+    def test_advance_before_completion(self):
+        template = [5, None, 3]
+        constraint = TemplateConstraint(template)
+        self.assertEqual(constraint.advance(), 5)
+        constraint.position = 1
+        self.assertIsNone(constraint.advance())
+        constraint.position = 2
+        self.assertEqual(constraint.advance(), 3)
+    
+    def test_advance_after_completion(self):
+        template = [5]
+        constraint = TemplateConstraint(template)
+        constraint.update(5)
+        self.assertEqual(constraint.advance(), [])
 
-        # Test invalid inputs
-        with self.assertRaises(ValueError):
-            TemplateConstraint(torch.tensor([5, -1, 10]))
+    def test_does_advance_correct_token(self):
+        template = [5, None, 3]
+        constraint = TemplateConstraint(template)
+        self.assertTrue(constraint.does_advance(5))
+        constraint.position = 1
+        self.assertTrue(constraint.does_advance(100))  # Any token allowed
+        constraint.position = 2
+        self.assertTrue(constraint.does_advance(3))
+        self.assertFalse(constraint.does_advance(4))
 
-        with self.assertRaises(ValueError):
-            TemplateConstraint([])
+    def test_does_advance_when_completed(self):
+        template = [5]
+        constraint = TemplateConstraint(template)
+        constraint.update(5)
+        self.assertFalse(constraint.does_advance(5))
 
-        with self.assertRaises(ValueError):
-            TemplateConstraint([5, -2, 10])
-
-        with self.assertRaises(ValueError):
-            TemplateConstraint([5, "word", 10])
-
-    def test_example_progression_with_wildcards(self):
-        # Test template: ["the", "", "school"]
-        # converted to token IDs: [5, -1, 10]
-        template = [5, -1, 10]
-        tc = TemplateConstraint(template)
-
-        #  "the"
-        stepped, completed, reset = tc.update(5)
+    def test_update_correct_sequence(self):
+        template = [5, None, 3]
+        constraint = TemplateConstraint(template)
+        stepped, completed, reset = constraint.update(5)
         self.assertTrue(stepped)
         self.assertFalse(completed)
         self.assertFalse(reset)
-        self.assertFalse(tc.completed)
-        self.assertEqual(tc.fulfilled_idx, 0)
+        self.assertEqual(constraint.position, 1)
 
-        # wildcard, any token (e.g 100)
-        stepped, completed, reset = tc.update(100)
+        stepped, completed, reset = constraint.update(10)  # None allows any token
         self.assertTrue(stepped)
         self.assertFalse(completed)
         self.assertFalse(reset)
-        self.assertFalse(tc.completed)
-        self.assertEqual(tc.fulfilled_idx, 1)
+        self.assertEqual(constraint.position, 2)
 
-        #  "school"
-        stepped, completed, reset = tc.update(10)
+        stepped, completed, reset = constraint.update(3)
         self.assertTrue(stepped)
         self.assertTrue(completed)
         self.assertFalse(reset)
-        self.assertTrue(tc.completed)
-        self.assertEqual(tc.fulfilled_idx, 2)
+        self.assertEqual(constraint.position, 3)
 
-    def test_reset_and_remaining(self):
-        # Test template: ["the", "", "school", "", "in"]
-        template = [5, -1, 10, -1, 15]
-        tc = TemplateConstraint(template)
-
-        # Match "the"
-        stepped, completed, reset = tc.update(5)
-        self.assertTrue(stepped)
-        self.assertEqual(tc.remaining(), 4)
-
-        stepped, completed, reset = tc.update(5)
+    def test_update_incorrect_token_resets(self):
+        template = [5, 6]
+        constraint = TemplateConstraint(template)
+        constraint.update(5)
+        stepped, completed, reset = constraint.update(7)  # Incorrect
         self.assertFalse(stepped)
+        self.assertFalse(completed)
         self.assertTrue(reset)
-        self.assertEqual(tc.fulfilled_idx, 0)
-        self.assertEqual(tc.remaining(), 5)
-
-        # Test complete sequence
-        tc.update(5)  # "the"
-        tc.update(100)  # wildcard
-        tc.update(10)  # "school"
-        tc.update(200)  # wildcard
-        stepped, completed, reset = tc.update(15)  # "in"
-        self.assertTrue(completed)
-        self.assertEqual(tc.remaining(), 0)
-
-    def test_advance_and_does_advance(self):
-        template = [5, -1, 10]  # ["the", "", "school"]
-        tc = TemplateConstraint(template)
-
-        self.assertEqual(
-            .advance(), 5)
-        self.assertTrue(tc.does_advance(5))
-        self.assertFalse(tc.does_advance(6))
-
-        tc.update(5)
-
-        # this is wildcard position and so it should advance with any token
-        self.assertIsNone(tc.advance())
-        self.assertTrue(tc.does_advance(100))
-        self.assertTrue(tc.does_advance(200))
-
-        tc.update(100)
-
-        self.assertEqual(tc.advance(), 10)
-        self.assertTrue(tc.does_advance(10))
-        self.assertFalse(tc.does_advance(11))
-
-    def test_copy(self):
-        template = [5, -1, 10]
-        tc = TemplateConstraint(template)
-
-        tc.update(5)
-        tc.update(100)
-
-        copied = tc.copy(stateful=False)
-        self.assertEqual(copied.token_ids, tc.token_ids)
-        self.assertEqual(copied.fulfilled_idx, -1)  # Reset state
+        self.assertEqual(constraint.position, 0)
+        self.assertFalse(constraint.completed)
+    
+    def test_reset(self):
+        template = [5, 6]
+        constraint = TemplateConstraint(template)
+        constraint.update(5)
+        constraint.reset()
+        self.assertEqual(constraint.position, 0)
+        self.assertFalse(constraint.completed)
+    
+    def test_remaining(self):
+        template = [5, None, 3]
+        constraint = TemplateConstraint(template)
+        self.assertEqual(constraint.remaining(), 3)
+        constraint.update(5)
+        self.assertEqual(constraint.remaining(), 2)
+        constraint.update(10)
+        self.assertEqual(constraint.remaining(), 1)
+        constraint.update(3)
+        self.assertEqual(constraint.remaining(), 0)
+    
+    def test_copy_without_state(self):
+        template = [5, None]
+        original = TemplateConstraint(template)
+        original.update(5)
+        copied = original.copy(stateful=False)
+        self.assertEqual(copied.position, 0)
         self.assertFalse(copied.completed)
+    
+    def test_copy_with_state(self):
+        template = [5, None]
+        original = TemplateConstraint(template)
+        original.update(5)
+        copied = original.copy(stateful=True)
+        self.assertEqual(copied.position, 1)
+        self.assertEqual(copied.completed, original.completed)
+    
+    def test_all_none_template(self):
+        template = [None, None, None]
+        constraint = TemplateConstraint(template)
+        self.assertTrue(constraint.does_advance(0))
+        constraint.update(0)
+        self.assertTrue(constraint.does_advance(1))
+        constraint.update(1)
+        self.assertTrue(constraint.does_advance(2))
+        constraint.update(2)
+        self.assertTrue(constraint.completed)
+    
+    def test_reset_and_retry(self):
+        template = [5, 6]
+        constraint = TemplateConstraint(template)
+        constraint.update(10)  # Incorrect, resets
+        constraint.update(5)
+        constraint.update(6)
+        self.assertTrue(constraint.completed)
 
-        stateful_copied = tc.copy(stateful=True)
-        self.assertEqual(stateful_copied.token_ids, tc.token_ids)
-        self.assertEqual(stateful_copied.fulfilled_idx, tc.fulfilled_idx)
-        self.assertEqual(stateful_copied.completed, tc.completed)
+    def test_single_token_template(self):
+        template = [10]
+        constraint = TemplateConstraint(template)
+        self.assertTrue(constraint.does_advance(10))
+        stepped, completed, reset = constraint.update(10)
+        self.assertTrue(stepped)
+        self.assertTrue(completed)
+        self.assertFalse(reset)
+    
+    def test_position_after_reset(self):
+        template = [5, 6]
+        constraint = TemplateConstraint(template)
+        constraint.update(5)
+        constraint.update(7)  # Resets
+        self.assertEqual(constraint.position, 0)
+        constraint.update(5)
+        constraint.update(6)
+        self.assertTrue(constraint.completed)
