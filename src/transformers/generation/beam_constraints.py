@@ -651,3 +651,44 @@ class OrderedConstraint(Constraint):
             new_constraint.position = self.position
             new_constraint.completed = self.completed
         return new_constraint
+
+class OrderedConstraintJunyao(Constraint):
+    def __init__(self, ordered_token_ids: List[int], vocab_length: int):
+        self.ordered_token_ids = ordered_token_ids
+        self.seqlen = len(ordered_token_ids)
+        self.position = 0
+        self.completed = False
+        self.vocab_length = vocab_length
+        super().__init__()
+
+    def advance(self):
+        if self.completed:
+            return []
+        return self.ordered_token_ids[self.position]
+
+    def does_advance(self, token_id: int):
+        if self.completed:
+            return False
+        return token_id == self.ordered_token_ids[self.position]
+
+    def update(self, token_id: int):
+        if self.does_advance(token_id):
+            self.position += 1
+            self.completed = self.position == self.seqlen
+            return True, self.completed, False
+        else:
+            return False, False, False  # allow unrelated tokens in between
+
+    def reset(self):
+        self.position = 0
+        self.completed = False
+
+    def remaining(self):
+        return self.seqlen - self.position
+
+    def copy(self, stateful=False):
+        new = OrderedConstraintJunyao(self.ordered_token_ids, self.vocab_length)
+        if stateful:
+            new.position = self.position
+            new.completed = self.completed
+        return new
