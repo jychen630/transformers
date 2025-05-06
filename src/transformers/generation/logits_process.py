@@ -2981,3 +2981,23 @@ class SimpleOrderedConstraintLogitsProcessor(LogitsProcessor):
         mask = torch.full_like(scores, -float("inf"))
         mask[:, expected_token] = 0.0
         return scores + mask
+
+class OrderedConstraintLogitsProcessor(LogitsProcessor):
+    def __init__(self, ordered_token_ids: List[int]):
+        self.ordered_token_ids = ordered_token_ids
+        self.position = 0
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        if self.position >= len(self.ordered_token_ids):
+            return scores  # no more constraints
+
+        expected_token = self.ordered_token_ids[self.position]
+
+        # If the last token matches expected_token, we move to the next
+        if input_ids[0, -1].item() == expected_token:
+            self.position += 1
+            return scores
+
+        # Else: encourage the expected token
+        scores[..., expected_token] += 5.0  # boost, not mask, empirical value..
+        return scores
