@@ -567,75 +567,42 @@ class TemplateConstraint(Constraint):
         if stateful:
             new.position = self.position
             new.completed = self.completed
-        return new
+        return new    
 
 class OrderedConstraint(Constraint):
     def __init__(self, ordered_token_ids: List[Optional[int]], vocab_length: int):
         self.ordered_token_ids = ordered_token_ids
         self.vocab_length = vocab_length
-        self.position = 0 
-        self.completed = False 
+        self.position = 0
+        self.completed = False
         self.seqlen = len(ordered_token_ids)
         super().__init__()
 
     def advance(self):
-        """Returns the next set of tokens that can be used to move the constraint forward."""
         if self.completed:
-            return []  #constraint is complete
-
+            return []
         if self.position >= len(self.ordered_token_ids):
             self.completed = True
-            return []  # All constraints yay
-
+            return []
         return self.ordered_token_ids[self.position]
 
-    # def does_advance(self, token_id: int):
-    #     if self.completed:
-    #         return False  # No further tokens are allowed if completed
-
-    #     # The current token list for this position
-    #     current_token_list = self.ordered_token_ids[self.position]
-    #     return token_id in current_token_list
-    
-    # def does_advance(self, token_id: int):
-    #     if self.completed:
-    #         return False  # Constraint is already complete
-
-    #     # Check if the token ID matches the expected token for advancement
-    #     return token_id == self.ordered_token_ids[self.position]
-    
     def does_advance(self, token_id: int):
         if self.completed:
             return False
         expected = self.ordered_token_ids[self.position]
         return expected is None or expected == token_id
 
-    # def update(self, token_id: int):
-    #     """Update the state of the constraint with the newly generated token."""
-    #     if not self.does_advance(token_id):
-    #         self.reset()  # Reset if the token does not advance
-    #         return False, False, True  # Return that reset occurred
-
-    #     # Move to the next position
-    #     self.position += 1
-    #     self.completed = self.position >= len(self.ordered_token_ids)
-    #     return True, self.completed, False  # Returns if progress was made, and if complete
-    
     def update(self, token_id: int):
-        """Update state without requiring contiguous token match."""
         if self.completed:
-            return False, True, False  # Already satisfied
-
+            return False, True, False
         expected = self.ordered_token_ids[self.position]
-
         if expected is None or expected == token_id:
             self.position += 1
             if self.position >= len(self.ordered_token_ids):
                 self.completed = True
-            return True, self.completed, False  # Match successful
+            return True, self.completed, False
         else:
-            return False, self.completed, False  # No reset!
-
+            return False, self.completed, False
 
     def reset(self):
         self.position = 0
@@ -650,44 +617,3 @@ class OrderedConstraint(Constraint):
             new_constraint.position = self.position
             new_constraint.completed = self.completed
         return new_constraint
-
-class OrderedConstraintJunyao(Constraint):
-    def __init__(self, ordered_token_ids: List[int], vocab_length: int):
-        self.ordered_token_ids = ordered_token_ids
-        self.seqlen = len(ordered_token_ids)
-        self.position = 0
-        self.completed = False
-        self.vocab_length = vocab_length
-        super().__init__()
-
-    def advance(self):
-        if self.completed:
-            return []
-        return self.ordered_token_ids[self.position]
-
-    def does_advance(self, token_id: int):
-        if self.completed:
-            return False
-        return token_id == self.ordered_token_ids[self.position]
-
-    def update(self, token_id: int):
-        if self.does_advance(token_id):
-            self.position += 1
-            self.completed = self.position == self.seqlen
-            return True, self.completed, False
-        else:
-            return False, False, False  # allow unrelated tokens in between
-
-    def reset(self):
-        self.position = 0
-        self.completed = False
-
-    def remaining(self):
-        return self.seqlen - self.position
-
-    def copy(self, stateful=False):
-        new = OrderedConstraintJunyao(self.ordered_token_ids, self.vocab_length)
-        if stateful:
-            new.position = self.position
-            new.completed = self.completed
-        return new

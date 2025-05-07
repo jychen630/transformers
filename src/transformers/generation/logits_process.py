@@ -2964,40 +2964,37 @@ class TemplateConstraintLogitsProcessor(LogitsProcessor):
             mask[..., expected] = 0 
             return scores + mask
 
-class SimpleOrderedConstraintLogitsProcessor(LogitsProcessor):
-    def __init__(self, ordered_token_ids, vocab_size):
+class OrderedConstraintLogitsProcessor(LogitsProcessor):
+    def __init__(self, ordered_token_ids, vocab_size, penalty_strength=3.0, boost_strength=5.0, gradual_boost=True):
         self.ordered_token_ids = ordered_token_ids
         self.vocab_size = vocab_size
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        position = input_ids.shape[1]  # current position in generation
-
-        if position >= len(self.ordered_token_ids):
-            return scores  # all constraints satisfied
-
-        expected_token = self.ordered_token_ids[position]
-
-        # Mask all tokens except the expected one
-        mask = torch.full_like(scores, -float("inf"))
-        mask[:, expected_token] = 0.0
-        return scores + mask
-
-class OrderedConstraintLogitsProcessor(LogitsProcessor):
-    def __init__(self, ordered_token_ids: List[int]):
-        self.ordered_token_ids = ordered_token_ids
         self.position = 0
+        self.penalty_strength = penalty_strength
+        self.boost_strength = boost_strength
+        self.gradual_boost = gradual_boost
+        self.generated_tokens = set()
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         if self.position >= len(self.ordered_token_ids):
-            return scores  # no more constraints
-
-        expected_token = self.ordered_token_ids[self.position]
-
-        # If the last token matches expected_token, we move to the next
-        if input_ids[0, -1].item() == expected_token:
-            self.position += 1
             return scores
 
-        # Else: encourage the expected token
-        scores[..., expected_token] += 5.0  # boost, not mask, empirical value..
-        return scores
+        expected_token = self.ordered_token_ids[self.position]
+        last_token = input_ids[0, -1].item()
+
+        if last_token == expected_token:
+            self.position += 1
+            if self.position >= len(self.ordered_token_ids):
+                return scores
+            expected_token = self.ordered_token_ids[self.position]
+
+        # boost and penalize
+        adjusted_scores = scores.clone()
+        penalty_mask = torch.full_like(scores, -self.penalty_strength)
+        penalty_mask[:, expected_token] = self.boost_strength
+
+        adjusted_scores += penalty_mask
+
+        return adjusted_scores
+
+    def advance(self):
+        self.position += 1
