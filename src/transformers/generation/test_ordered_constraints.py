@@ -14,7 +14,6 @@ tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 # model = GPT2LMHeadModel.from_pretrained(model_name)
 # tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 tokenizer.pad_token_id = tokenizer.eos_token_id
-vocab = list(tokenizer.get_vocab().values())
 
 if torch.cuda.is_available():
     print("CUDA is available")
@@ -40,7 +39,7 @@ for phrase in ordered_phrases:
             #ValueError: Segment ' halloween' tokenized into multiple tokens: [6899, 322, 6429]
             raise ValueError(f"Segment '{segment}' tokenized into multiple tokens: {ids}")
         token_ids.append(ids[0])
-    constraint = OrderedConstraint(token_ids, vocab_length=len(vocab))
+    constraint = OrderedConstraint(token_ids)
     ordered_constraints.append(constraint)
 
 inputs = tokenizer(input_text, return_tensors="pt")

@@ -570,13 +570,13 @@ class TemplateConstraint(Constraint):
         return new    
 
 class OrderedConstraint(Constraint):
-    def __init__(self, ordered_token_ids: List[Optional[int]], vocab_length: int):
+    def __init__(self, ordered_token_ids: List[Optional[int]]):
         self.ordered_token_ids = ordered_token_ids
-        self.vocab_length = vocab_length
         self.position = 0
         self.completed = False
         self.seqlen = len(ordered_token_ids)
         super().__init__()
+        self.reset()
 
     def advance(self):
         if self.completed:
@@ -612,7 +612,7 @@ class OrderedConstraint(Constraint):
         return len(self.ordered_token_ids) - self.position
 
     def copy(self, stateful=False):
-        new_constraint = OrderedConstraint(self.ordered_token_ids, self.vocab_length)
+        new_constraint = OrderedConstraint(self.ordered_token_ids)
         if stateful:
             new_constraint.position = self.position
             new_constraint.completed = self.completed
