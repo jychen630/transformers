@@ -1,8 +1,6 @@
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from transformers.generation.beam_constraints import OrderedConstraint
 from transformers import LogitsProcessorList
-# from transformers import SimpleOrderedConstraintLogitsProcessor
-# from transformers import LogitsProcessorList
 from transformers import LogitsProcessor
 import torch
 import time
@@ -23,10 +21,14 @@ if torch.cuda.is_available():
     model.cuda()
 
 
-input_text = "Well, what if"
+input_text = "Healthier life "
+# input_text = "Irish workers were subject"
+
 ordered_phrases = [
 #[" weather", " freaking"],
-   [" holiday", " um", " depressing", " intricate", " tariff"]
+#    [" holiday", " um", " depressing", " intricate", " tariff"]
+   [" be", " will", " and", " well"]
+#    [" large", " amounts", " many"]
 ]
 
 ordered_constraints = []

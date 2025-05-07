@@ -28,6 +28,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from transformers.generation.candidate_generator import AssistantVocabTranslatorCache
+from transformers.generation.beam_constraints import OrderedConstraint, TemplateConstraint
 
 from ..cache_utils import (
     Cache,
@@ -1151,10 +1152,10 @@ class GenerationMixin:
         
         if constraints is not None:
             for constraint in constraints:
-                # if isinstance(constraint, TemplateConstraint):
-                #     processors.append(TemplateConstraintLogitsProcessor(template=constraint.template, vocab_size=self.config.vocab_size))
-                #elif isinstance(constraint, OrderedConstraint):
-                processors.append(OrderedConstraintLogitsProcessor(ordered_token_ids=constraint.ordered_token_ids))
+                if isinstance(constraint, TemplateConstraint):
+                    processors.append(TemplateConstraintLogitsProcessor(template=constraint.template, vocab_size=self.config.vocab_size))
+                elif isinstance(constraint, OrderedConstraint):
+                    processors.append(OrderedConstraintLogitsProcessor(ordered_token_ids=constraint.ordered_token_ids, vocab_size=self.config.vocab_size))
         return processors
 
     def _get_stopping_criteria(
